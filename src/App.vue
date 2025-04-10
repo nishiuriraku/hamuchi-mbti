@@ -3,7 +3,7 @@ import { onMounted, ref, computed, useTemplateRef } from 'vue'
 import defaultData from './data.ts'
 import type { MBTI, MBTIDatas, MBTIGroup } from './data.ts'
 
-import { Bar } from 'vue-chartjs'
+import { Bar, Doughnut } from 'vue-chartjs'
 import {
   Chart as ChartJS,
   Title,
@@ -12,9 +12,10 @@ import {
   BarElement,
   CategoryScale,
   LinearScale,
+  ArcElement,
 } from 'chart.js'
 
-ChartJS.register(Title, Tooltip, Legend, BarElement, CategoryScale, LinearScale)
+ChartJS.register(Title, Tooltip, Legend, BarElement, CategoryScale, LinearScale, ArcElement)
 
 const chartOptions = {
   responsive: true,
@@ -24,7 +25,7 @@ const chartOptions = {
 const colorFn = (color: string) => Array.from(Array(4)).map(() => color)
 const datas = ref(defaultData)
 const chartData = computed(() => ({
-  labels: Object.keys(datas.value),
+  labels: Object.entries(defaultData).map(([k, v]) => `${k} (${v.name})`),
   datasets: [
     {
       data: Object.values(datas.value).map((v) => v.members.length),
@@ -144,11 +145,21 @@ const bgColors = {
   sky: 'bg-sky-50',
   yellow: 'bg-yellow-50',
 }
+
+const tab = ref('tab-1')
+const changeTab: HTMLButtonElement['onchange'] = (e) => {
+  const target = e.target as HTMLButtonElement
+  tab.value = target?.id
+}
+const tabs = [
+  { id: 'tab-1', text: '線' },
+  { id: 'tab-2', text: 'ドーナツ' },
+]
 </script>
 
 <template>
   <div class="max-w-[900px] flex flex-col mx-auto px-4">
-    <div class="flex justify-between mt-10 mb-10">
+    <div class="flex flex-wrap flex-col md:flex-row md:justify-between gap-3 md:gap-0 mt-10 mb-10">
       <h1 class="text-3xl font-bold">HAMUBTI</h1>
 
       <div class="flex justify-end gap-3">
@@ -171,8 +182,25 @@ const bgColors = {
       </div>
     </div>
 
-    <div class="w-full h-[500px]">
+    <ul
+      class="flex flex-wrap text-sm font-medium text-center text-gray-500 border-b border-gray-200"
+    >
+      <li class="me-2" v-for="v in tabs" :key="v.id">
+        <button
+          :class="`inline-block p-4 rounded-t-lg ${tab === v.id ? 'text-blue-600 bg-gray-100 active' : 'hover:text-gray-600 hover:bg-gray-50'}`"
+          :id="v.id"
+          @click="changeTab"
+        >
+          {{ v.text }}
+        </button>
+      </li>
+    </ul>
+
+    <div v-if="tab === 'tab-1'" class="w-full h-[500px]" id="panel-1">
       <Bar id="my-chart-id" :options="chartOptions" :data="chartData" />
+    </div>
+    <div v-if="tab === 'tab-2'" class="w-full h-[500px]" id="panel-2">
+      <Doughnut id="my-chart-doughnut" :options="chartOptions" :data="chartData" />
     </div>
 
     <div class="mt-10">
