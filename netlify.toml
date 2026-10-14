@@ -1,0 +1,10 @@
+# hamuchi-mbti の Netlify ビルド設定
+# フロントは Vite SPA（dist）、API は Functions（netlify/functions/）でプロキシする。
+
+[build]
+  command = "bun run build"
+  publish = "dist"
+
+[functions]
+  # 関数のソース置き場（publish ディレクトリの外に置くのが Netlify の推奨）
+  directory = "netlify/functions"

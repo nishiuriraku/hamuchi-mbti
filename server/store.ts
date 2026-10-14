@@ -5,7 +5,7 @@
 import { Database } from 'bun:sqlite'
 import { mkdirSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
-import { MBTI_TYPES, isMBTI, type MBTI } from './mbti'
+import { MBTI_TYPES, isMBTI } from './mbti'
 
 export interface Member {
   id: number
@@ -28,6 +28,11 @@ export class HttpError extends Error {
     this.name = 'HttpError'
   }
 }
+
+/** DB 全体のメンバー上限（連続投稿による DB 肥大化・import 濫用の防御） */
+export const MAX_DB_MEMBERS = 2000
+/** addMember と同じ名前制約を import 時にも適用する */
+export const MAX_NAME_LENGTH = 50
 
 export function openDb(path?: string): Database {
   const raw = path ?? process.env.DB_PATH ?? './data/mbti.db'
@@ -66,7 +71,9 @@ export function addMember(db: Database, mbti: string, name: string): Member {
   if (!isMBTI(mbti)) throw new HttpError(400, 'unknown mbti')
   const trimmed = name.trim()
   if (!trimmed) throw new HttpError(400, 'name is empty')
-  if (trimmed.length > 50) throw new HttpError(400, 'name is too long')
+  if (trimmed.length > MAX_NAME_LENGTH) throw new HttpError(400, 'name is too long')
+  const count = (db.query('SELECT COUNT(*) AS n FROM members').get() as { n: number }).n
+  if (count >= MAX_DB_MEMBERS) throw new HttpError(409, 'member limit reached')
   const info = db.query('INSERT INTO members (mbti, name) VALUES (?, ?)').run(mbti, trimmed)
   return { id: Number(info.lastInsertRowid), name: trimmed }
 }
@@ -86,6 +93,8 @@ type ImportMember = string | { id?: number; name?: string }
  *   - アプリのエクスポート形式: { INTJ: { name, group, groupName, members: [...] }, ... }
  *   - 簡易形式:                  { INTJ: ["名前", ...], ... }
  * members の要素は {id,name}[]（新形式）と string[]（旧 localStorage 形式）の両方可。
+ * addMember と同じく、名前が空または MAX_NAME_LENGTH 超の行は保存しない。
+ * 取り込み行数が MAX_DB_MEMBERS を超える場合は 400。
  */
 export function replaceAllMembers(db: Database, payload: unknown): number {
   if (typeof payload !== 'object' || payload === null) {
@@ -101,9 +110,10 @@ export function replaceAllMembers(db: Database, payload: unknown): number {
     for (const m of list as ImportMember[]) {
       const name =
         typeof m === 'string' ? m.trim() : typeof m?.name === 'string' ? m.name.trim() : ''
-      if (name) rows.push({ mbti: key, name })
+      if (name && name.length <= MAX_NAME_LENGTH) rows.push({ mbti: key, name })
     }
   }
+  if (rows.length > MAX_DB_MEMBERS) throw new HttpError(400, 'too many members')
   db.exec('BEGIN')
   try {
     db.exec('DELETE FROM members')

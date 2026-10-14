@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { onMounted, ref, computed, useTemplateRef } from 'vue'
+import { onMounted, ref, computed } from 'vue'
 import defaultData from './data.ts'
 import type { MBTI, MBTIDatas, MBTIGroup } from './data.ts'
 
-import { addMember, deleteMember, fetchMembers, importMembers } from './api'
-import { downloadJson, blobToJson } from './jsonUtil'
+import { addMember, deleteMember, fetchMembers } from './api'
+import { getWriteToken, TURNSTILE_ENABLED } from './turnstile'
+import { downloadJson } from './jsonUtil'
 
 import { Bar, Doughnut } from 'vue-chartjs'
 import {
@@ -69,7 +70,13 @@ const onClick = async () => {
     return
   }
   try {
-    const member = await addMember(type.value, name.value.trim())
+    // Turnstile 有効時は bot 検証トークンを取得してから書き込む（失敗したら止める）
+    const token = await getWriteToken()
+    if (TURNSTILE_ENABLED && !token) {
+      alert('bot 検証に失敗しました。ページを再読み込みしてもう一度お試しください。')
+      return
+    }
+    const member = await addMember(type.value, name.value.trim(), token)
     datas.value[type.value].members.push(member)
     name.value = ''
   } catch (e) {
@@ -82,28 +89,18 @@ const onDelete = async (mbti: MBTI, id: number) => {
   if (!member) return
   if (!confirm(`${member.name} を削除していいですか？`)) return
   try {
-    await deleteMember(id)
+    const token = await getWriteToken()
+    if (TURNSTILE_ENABLED && !token) {
+      alert('bot 検証に失敗しました。ページを再読み込みしてもう一度お試しください。')
+      return
+    }
+    await deleteMember(id, token)
   } catch (e) {
     console.error(e)
     alert('削除に失敗しました。')
     return
   }
   datas.value[mbti].members = datas.value[mbti].members.filter((m) => m.id !== id)
-}
-
-const importRef = useTemplateRef('importRef')
-const onImport: HTMLInputElement['onchange'] = async (e) => {
-  const el = e.target as HTMLInputElement
-  try {
-    const json = (await blobToJson(el.files?.[0])) as MBTIDatas
-    await importMembers(json)
-    await loadMembers()
-  } catch (e) {
-    alert('インポート失敗')
-    console.error(e)
-  } finally {
-    el.value = ''
-  }
 }
 
 const onExport = () => {
@@ -183,15 +180,6 @@ const tabs = [
       <h1 class="text-3xl font-bold">HAMUBTI</h1>
 
       <div class="flex justify-end gap-3">
-        <button
-          type="button"
-          class="text-white bg-blue-600 hover:bg-blue-800 focus:outline-none focus:ring-4 focus:ring-blue-300 disabled:bg-gray-200 disabled:text-gray-400 font-medium rounded-full text-sm px-6 py-1 text-center"
-          @click="importRef?.click()"
-        >
-          インポート
-        </button>
-        <input ref="importRef" type="file" accept="application/json" hidden @change="onImport" />
-
         <button
           type="button"
           class="text-white bg-green-600 hover:bg-green-800 focus:outline-none focus:ring-4 focus:ring-green-300 disabled:bg-gray-200 disabled:text-gray-400 font-medium rounded-full text-sm px-6 py-1 text-center"

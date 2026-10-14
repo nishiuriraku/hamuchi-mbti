@@ -6,6 +6,7 @@
  */
 import {
   HttpError,
+  MAX_DB_MEMBERS,
   addMember,
   collectMembers,
   deleteMember,
@@ -67,6 +68,30 @@ try {
   check('null は例外', false)
 } catch (e) {
   check('null は 400', e instanceof HttpError && e.status === 400)
+}
+
+// --- 追加の防御（import の名前長 / 件数上限） ---
+check(
+  'import は 50 字超の名前を捨てる',
+  replaceAllMembers(db, { INTJ: ['あ'.repeat(51), 'ふつうの名前'] }) === 1,
+)
+
+try {
+  replaceAllMembers(db, {
+    INTJ: Array.from({ length: MAX_DB_MEMBERS + 1 }, () => 'x'),
+  })
+  check('上限超過 import は例外', false)
+} catch (e) {
+  check('上限超過 import は 400', e instanceof HttpError && e.status === 400)
+}
+
+replaceAllMembers(db, { INTJ: Array.from({ length: MAX_DB_MEMBERS }, (_, i) => `m${i}`) })
+check('上限ちょうどの import は通る', collectMembers(db).INTJ.length === MAX_DB_MEMBERS)
+try {
+  addMember(db, 'INTJ', 'はむ')
+  check('上限到達後の add は例外', false)
+} catch (e) {
+  check('上限到達後の add は 409', e instanceof HttpError && e.status === 409)
 }
 
 console.log(failed === 0 ? 'ALL PASS' : `${failed} FAILED`)
