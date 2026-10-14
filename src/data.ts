@@ -17,11 +17,16 @@ export type MBTI =
   | 'ESFP'
 export type MBTIGroup = 'analysts' | 'diplomats' | 'sentinels' | 'explorers'
 
+export interface Member {
+  id: number
+  name: string
+}
+
 export interface MBTIData {
   name: string
   group: MBTIGroup
   groupName: string
-  members: Array<string>
+  members: Array<Member>
 }
 
 export type MBTIDatas = {

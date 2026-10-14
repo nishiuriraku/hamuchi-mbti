@@ -3,6 +3,9 @@ import { onMounted, ref, computed, useTemplateRef } from 'vue'
 import defaultData from './data.ts'
 import type { MBTI, MBTIDatas, MBTIGroup } from './data.ts'
 
+import { addMember, deleteMember, fetchMembers, importMembers } from './api'
+import { downloadJson, blobToJson } from './jsonUtil'
+
 import { Bar, Doughnut } from 'vue-chartjs'
 import {
   Chart as ChartJS,
@@ -23,7 +26,8 @@ const chartOptions = {
 }
 
 const colorFn = (color: string) => Array.from(Array(4)).map(() => color)
-const datas = ref(defaultData)
+const datas = ref<MBTIDatas>(structuredClone(defaultData))
+const loading = ref(true)
 const chartData = computed(() => ({
   labels: Object.entries(defaultData).map(([k, v]) => `${k} (${v.name})`),
   datasets: [
@@ -40,50 +44,65 @@ const chartData = computed(() => ({
   ],
 }))
 
-const setItem = (data: MBTIDatas) => {
-  localStorage.setItem('mbtis', JSONCrush.crush(JSON.stringify(data)))
+/** サーバーから members を取得して datas にマージする */
+const loadMembers = async () => {
+  try {
+    const members = await fetchMembers()
+    for (const key of Object.keys(datas.value) as MBTI[]) {
+      datas.value[key].members = members[key] ?? []
+    }
+  } catch (e) {
+    console.error(e)
+    alert('データの読み込みに失敗しました。')
+  } finally {
+    loading.value = false
+  }
 }
 
-import JSONCrush from 'jsoncrush'
-
-onMounted(() => {
-  const savedValue = localStorage.getItem('mbtis')
-  if (!savedValue) {
-    return setItem(defaultData)
-  }
-  datas.value = JSON.parse(JSONCrush.uncrush(savedValue))
-})
+onMounted(loadMembers)
 
 const type = ref<MBTI | ''>('')
 const name = ref('')
-const onClick = () => {
-  if (name.value && type.value) {
-    datas.value[type.value].members.push(name.value)
-    setItem(datas.value)
-  } else {
+const onClick = async () => {
+  if (!name.value || !type.value) {
     alert('名前とMBTIを選んでください。')
+    return
+  }
+  try {
+    const member = await addMember(type.value, name.value.trim())
+    datas.value[type.value].members.push(member)
+    name.value = ''
+  } catch (e) {
+    console.error(e)
+    alert('追加に失敗しました。')
   }
 }
-const onDelete = (members: string[], index: number) => {
-  const member = members[index]
-  if (confirm(`${member} を削除していいですか？`)) {
-    const deletedMember = members.filter((_, i) => i !== index)
-    if (type.value) datas.value[type.value].members = deletedMember
-    setItem(datas.value)
+const onDelete = async (mbti: MBTI, id: number) => {
+  const member = datas.value[mbti].members.find((m) => m.id === id)
+  if (!member) return
+  if (!confirm(`${member.name} を削除していいですか？`)) return
+  try {
+    await deleteMember(id)
+  } catch (e) {
+    console.error(e)
+    alert('削除に失敗しました。')
+    return
   }
+  datas.value[mbti].members = datas.value[mbti].members.filter((m) => m.id !== id)
 }
 
-import { downloadJson, blobToJson } from './jsonUtil'
 const importRef = useTemplateRef('importRef')
 const onImport: HTMLInputElement['onchange'] = async (e) => {
   const el = e.target as HTMLInputElement
   try {
     const json = (await blobToJson(el.files?.[0])) as MBTIDatas
-    datas.value = json
-    setItem(json)
+    await importMembers(json)
+    await loadMembers()
   } catch (e) {
     alert('インポート失敗')
     console.error(e)
+  } finally {
+    el.value = ''
   }
 }
 
@@ -159,6 +178,7 @@ const tabs = [
 
 <template>
   <div class="max-w-[900px] flex flex-col mx-auto px-4">
+    <div v-if="loading" class="text-center text-gray-500 py-4">読み込み中...</div>
     <div class="flex flex-wrap flex-col md:flex-row md:justify-between gap-3 md:gap-0 mt-10 mb-10">
       <h1 class="text-3xl font-bold">HAMUBTI</h1>
 
@@ -233,19 +253,19 @@ const tabs = [
           {{ type }} {{ datas[type].name }} {{ datas[type].members.length }}人
         </h3>
         <div class="flex flex-wrap gap-2 mt-2">
-          <div v-for="(m, index) in datas[type].members" :key="m" class="flex items-center gap-2">
+          <div v-for="m in datas[type].members" :key="m.id" class="flex items-center gap-2">
             <span
               id="badge-dismiss-default"
               :class="`inline-flex items-center px-2 py-1 me-2 text-sm font-medium rounded-sm ${badgeColors[groupToColor(datas[type].group)]}`"
             >
-              {{ m }}
+              {{ m.name }}
               <button
                 v-if="deleteMode"
                 type="button"
                 :class="`inline-flex items-center p-1 ms-2 text-sm bg-transparent rounded-xs${badgeDeleteColors[groupToColor(datas[type].group)]}`"
                 data-dismiss-target="#badge-dismiss-default"
                 aria-label="Remove"
-                @click="onDelete(datas[type].members, index)"
+                @click="onDelete(type, m.id)"
               >
                 <svg
                   class="w-2 h-2"
@@ -262,7 +282,7 @@ const tabs = [
                     d="m1 1 6 6m0 0 6 6M7 7l6-6M7 7l-6 6"
                   />
                 </svg>
-                <span class="sr-only">{{ m }}</span>
+                <span class="sr-only">{{ m.name }}</span>
               </button>
             </span>
           </div>
